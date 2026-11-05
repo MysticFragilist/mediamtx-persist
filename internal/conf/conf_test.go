@@ -1222,3 +1222,49 @@ func TestConfAddDeprecatedCredentialsTwice(t *testing.T) {
 	require.NoError(t, c3.PatchPath("test", &patch))
 	require.Equal(t, c2, c3)
 }
+
+func TestConfAPIPersist(t *testing.T) {
+	for _, ca := range []struct {
+		name string
+		conf string
+		err  string
+	}{
+		{
+			"without api",
+			"apiPersist: yes\napiPersistConnection: postgres://localhost/db\n",
+			"'apiPersist' requires 'api' to be enabled",
+		},
+		{
+			"unsupported driver",
+			"api: yes\napiPersist: yes\napiPersistDriver: mysql\napiPersistConnection: x\n",
+			`unsupported 'apiPersistDriver' "mysql" (supported: postgres)`,
+		},
+		{
+			"missing connection",
+			"api: yes\napiPersist: yes\n",
+			"'apiPersistConnection' must be set when 'apiPersist' is enabled",
+		},
+	} {
+		t.Run(ca.name, func(t *testing.T) {
+			tmpf := createTempFile(t, []byte(ca.conf))
+
+			_, _, err := Load(tmpf, nil, nil)
+			require.EqualError(t, err, ca.err)
+		})
+	}
+
+	tmpf := createTempFile(t, []byte("api: yes\napiPersist: yes\n"+
+		"apiPersistConnection: postgres://user:secret@localhost:5432/db?sslmode=disable\n"))
+
+	c, _, err := Load(tmpf, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "postgres", c.APIPersistDriver)
+	require.Equal(t, "postgres://user:secret@localhost:5432/db?sslmode=disable", c.APIPersistConnection)
+	require.Equal(t, "<redacted>", Redact(c).APIPersistConnection)
+
+	// patching with the redacted value keeps the original one.
+	var g OptionalGlobal
+	require.NoError(t, g.UnmarshalJSON([]byte(`{"apiPersistConnection":"<redacted>"}`)))
+	require.NoError(t, c.PatchGlobal(&g))
+	require.Equal(t, "postgres://user:secret@localhost:5432/db?sslmode=disable", c.APIPersistConnection)
+}

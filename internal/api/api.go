@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/bluenviron/mediamtx/internal/apipersist"
 	"github.com/bluenviron/mediamtx/internal/auth"
 	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/defs"
@@ -327,6 +328,8 @@ func (a *API) writeConfigWriteError(ctx *gin.Context, err error) {
 		a.writeError(ctx, http.StatusServiceUnavailable, fmt.Errorf("API is closing, retry"))
 	case errors.Is(err, conf.ErrPathNotFound):
 		a.writeError(ctx, http.StatusNotFound, err)
+	case errors.Is(err, apipersist.ErrWrite):
+		a.writeError(ctx, http.StatusInternalServerError, err)
 	default:
 		a.writeError(ctx, http.StatusBadRequest, err)
 	}

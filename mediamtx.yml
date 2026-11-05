@@ -167,6 +167,20 @@ apiAllowOrigins: []
 # These proxies can use the X-Forwarded-For header to set the real IP of clients,
 # and the X-Forwarded-Proto header to set the original protocol.
 apiTrustedProxies: []
+# Persist paths created, edited or deleted through the Control API
+# (/v3/config/paths/*) into a database, and restore them at startup,
+# so that they survive restarts. Requires 'api' to be enabled.
+apiPersist: false
+# Database driver. Available values are "postgres".
+apiPersistDriver: postgres
+# Database connection string, for instance:
+# postgres://user:pass@localhost:5432/mediamtx?sslmode=disable
+apiPersistConnection: ''
+# Path of the file containing the ID of this server, which is used to separate
+# paths of different servers that share the same database.
+# The file is created with a random ID if it doesn't exist.
+# When empty, the file is "mediamtx-server-id" next to the configuration file.
+apiPersistServerIDFile: ''
 
 ###############################################
 # Global settings -> Metrics server

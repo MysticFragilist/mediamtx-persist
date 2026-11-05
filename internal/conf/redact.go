@@ -6,6 +6,10 @@ const redactedCredential = "<redacted>"
 func Redact(c *Conf) *Conf {
 	c = c.Clone()
 
+	if c.APIPersistConnection != "" {
+		c.APIPersistConnection = redactedCredential
+	}
+
 	for i := range c.AuthInternalUsers {
 		if c.AuthInternalUsers[i].Pass != "" {
 			c.AuthInternalUsers[i].Pass = Credential(redactedCredential)

@@ -295,6 +295,12 @@ type Conf struct {
 	APIAllowOrigins   []string   `json:"apiAllowOrigins"`
 	APITrustedProxies IPNetworks `json:"apiTrustedProxies"`
 
+	// Control API persistence
+	APIPersist             bool   `json:"apiPersist"`
+	APIPersistDriver       string `json:"apiPersistDriver"`
+	APIPersistConnection   string `json:"apiPersistConnection"`
+	APIPersistServerIDFile string `json:"apiPersistServerIDFile"`
+
 	// Metrics
 	Metrics               bool       `json:"metrics"`
 	MetricsAddress        string     `json:"metricsAddress"`
@@ -463,6 +469,7 @@ func (conf *Conf) setDefaults() {
 	conf.APIServerKey = "server.key"
 	conf.APIServerCert = "server.crt"
 	conf.APIAllowOrigins = []string{}
+	conf.APIPersistDriver = "postgres"
 
 	// Metrics
 	conf.MetricsAddress = ":9998"
@@ -721,6 +728,20 @@ func (conf *Conf) validate(l logger.Writer) error {
 	if conf.API {
 		if conf.APIAddress == "" {
 			return fmt.Errorf("'apiAddress' must be set when API is enabled")
+		}
+	}
+
+	// Control API persistence
+
+	if conf.APIPersist {
+		if !conf.API {
+			return fmt.Errorf("'apiPersist' requires 'api' to be enabled")
+		}
+		if conf.APIPersistDriver != "postgres" {
+			return fmt.Errorf("unsupported 'apiPersistDriver' %q (supported: postgres)", conf.APIPersistDriver)
+		}
+		if conf.APIPersistConnection == "" {
+			return fmt.Errorf("'apiPersistConnection' must be set when 'apiPersist' is enabled")
 		}
 	}
 
@@ -1203,6 +1224,12 @@ func (conf *Conf) PatchGlobal(optional *OptionalGlobal) error {
 				passwords[users[i].User] = oldPasswords[1:]
 			}
 		}
+	}
+
+	// when the persistence connection string is "<redacted>", which is the output of /config/global/get, keep the old one.
+	connField := reflect.ValueOf(optional.Values).Elem().FieldByName("APIPersistConnection")
+	if !connField.IsNil() && connField.Elem().String() == redactedCredential {
+		connField.Set(reflect.Zero(connField.Type()))
 	}
 
 	copyStructFields(conf, optional.Values)

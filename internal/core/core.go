@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bluenviron/mediamtx/internal/api"
+	"github.com/bluenviron/mediamtx/internal/apipersist"
 	"github.com/bluenviron/mediamtx/internal/auth"
 	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/confwatcher"
@@ -220,6 +221,8 @@ type Core struct {
 	moqServer       *moq.Server
 	api             *api.API
 	confWatcher     *confwatcher.ConfWatcher
+	persistStore    apipersist.Store
+	persistKey      persistKey
 
 	confMutex       sync.RWMutex
 	conf            *conf.Conf
@@ -417,6 +420,18 @@ outer:
 				break outer
 			}
 
+			// keep paths created through the API.
+			// if the persistence database is not reachable, keep the current configuration
+			// instead of dropping those paths.
+			err = p.ensurePersistStore(newConf)
+			if err == nil {
+				newConf, err = p.mergePersistedPaths(newConf)
+			}
+			if err != nil {
+				p.Log(logger.Error, "%s; configuration not reloaded", err)
+				continue outer
+			}
+
 			err = p.applyConf(newConf)
 			if err != nil {
 				p.Log(logger.Error, "%s", err)
@@ -455,6 +470,9 @@ outer:
 
 		case req := <-p.chAPIConfigPathAdd:
 			newConf, err := p.doAPIConfigPathAdd(req.name, req.conf)
+			if err == nil {
+				err = p.persistPath(req.name, newConf)
+			}
 
 			var fatalErr error
 			if err == nil {
@@ -471,6 +489,9 @@ outer:
 
 		case req := <-p.chAPIConfigPathPatch:
 			newConf, err := p.doAPIConfigPathPatch(req.name, req.conf)
+			if err == nil {
+				err = p.persistPath(req.name, newConf)
+			}
 
 			var fatalErr error
 			if err == nil {
@@ -487,6 +508,9 @@ outer:
 
 		case req := <-p.chAPIConfigPathReplace:
 			newConf, err := p.doAPIConfigPathReplace(req.name, req.conf)
+			if err == nil {
+				err = p.persistPath(req.name, newConf)
+			}
 
 			var fatalErr error
 			if err == nil {
@@ -503,6 +527,9 @@ outer:
 
 		case req := <-p.chAPIConfigPathDelete:
 			newConf, err := p.doAPIConfigPathDelete(req.name)
+			if err == nil {
+				err = p.persistPath(req.name, newConf)
+			}
 
 			var fatalErr error
 			if err == nil {
@@ -616,6 +643,24 @@ func (p *Core) createResources(initial bool) error {
 
 		p.externalCmdPool = &externalcmd.Pool{}
 		p.externalCmdPool.Initialize()
+	}
+
+	err = p.ensurePersistStore(p.conf)
+	if err != nil {
+		return err
+	}
+
+	// restore paths created through the API before the previous shutdown.
+	if initial && p.persistStore != nil {
+		var merged *conf.Conf
+		merged, err = p.mergePersistedPaths(p.conf)
+		if err != nil {
+			return err
+		}
+
+		p.confMutex.Lock()
+		p.conf = merged
+		p.confMutex.Unlock()
 	}
 
 	if p.authManager == nil {
@@ -1337,6 +1382,10 @@ func (p *Core) closeResources(newConf *conf.Conf) error {
 	if newConf == nil && p.confWatcher != nil {
 		p.confWatcher.Close()
 		p.confWatcher = nil
+	}
+
+	if newConf == nil {
+		p.closePersistStore()
 	}
 
 	if p.api != nil {

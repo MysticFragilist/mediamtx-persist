@@ -328,6 +328,14 @@ components:
           type: array
           items:
             type: string
+        apiPersist:
+          type: boolean
+        apiPersistDriver:
+          type: string
+        apiPersistConnection:
+          type: string
+        apiPersistServerIDFile:
+          type: string
         apiEncryption:
           type: boolean
         apiServerCert:
