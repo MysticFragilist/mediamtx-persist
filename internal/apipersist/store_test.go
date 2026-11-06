@@ -5,7 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/bluenviron/mediamtx/internal/conf"
@@ -25,62 +24,50 @@ func pathJSON(t *testing.T, p *conf.OptionalPath) string {
 	return string(byts)
 }
 
-func testStore(t *testing.T, open func(serverID string) Store) {
+func testStore(t *testing.T, open func() Store) {
 	t.Helper()
 
 	ctx := context.Background()
 
-	serverA := uuid.New().String()
-	serverB := uuid.New().String()
-
-	a := open(serverA)
-	defer a.Close()
-	b := open(serverB)
-	defer b.Close()
+	s := open()
 
 	defer func() {
-		for _, s := range []Store{a, b} {
-			paths, err := s.Load(ctx)
-			require.NoError(t, err)
-			for name := range paths {
-				require.NoError(t, s.Delete(ctx, name))
-			}
+		paths, err := s.Load(ctx)
+		require.NoError(t, err)
+		for name := range paths {
+			require.NoError(t, s.Delete(ctx, name))
 		}
+		s.Close()
 	}()
 
-	require.Equal(t, serverA, a.ServerID())
-
-	paths, err := a.Load(ctx)
+	paths, err := s.Load(ctx)
 	require.NoError(t, err)
 	require.Empty(t, paths)
 
-	require.NoError(t, a.Upsert(ctx, "cam1", mustPath(t, `{"source":"rtsp://host1/stream"}`)))
-	require.NoError(t, a.Upsert(ctx, "cam2", mustPath(t, `{"source":"rtsp://host2/stream"}`)))
-	require.NoError(t, b.Upsert(ctx, "cam1", mustPath(t, `{"source":"rtsp://other/stream"}`)))
+	require.NoError(t, s.Upsert(ctx, "cam1", mustPath(t, `{"source":"rtsp://host1/stream"}`)))
+	require.NoError(t, s.Upsert(ctx, "cam2", mustPath(t, `{"source":"rtsp://host2/stream"}`)))
 
 	// update
-	require.NoError(t, a.Upsert(ctx, "cam2", mustPath(t, `{"source":"rtsp://host2/stream","sourceOnDemand":true}`)))
+	require.NoError(t, s.Upsert(ctx, "cam2", mustPath(t, `{"source":"rtsp://host2/stream","sourceOnDemand":true}`)))
 
-	paths, err = a.Load(ctx)
+	paths, err = s.Load(ctx)
 	require.NoError(t, err)
 	require.Len(t, paths, 2)
 	require.JSONEq(t, `{"source":"rtsp://host1/stream"}`, pathJSON(t, paths["cam1"]))
 	require.JSONEq(t, `{"source":"rtsp://host2/stream","sourceOnDemand":true}`, pathJSON(t, paths["cam2"]))
 
 	// delete, including a missing path
-	require.NoError(t, a.Delete(ctx, "cam1"))
-	require.NoError(t, a.Delete(ctx, "missing"))
+	require.NoError(t, s.Delete(ctx, "cam1"))
+	require.NoError(t, s.Delete(ctx, "missing"))
 
-	paths, err = a.Load(ctx)
+	// data survives reopening the store
+	s2 := open()
+	defer s2.Close()
+
+	paths, err = s2.Load(ctx)
 	require.NoError(t, err)
 	require.Len(t, paths, 1)
 	require.Contains(t, paths, "cam2")
-
-	// other server is isolated
-	paths, err = b.Load(ctx)
-	require.NoError(t, err)
-	require.Len(t, paths, 1)
-	require.JSONEq(t, `{"source":"rtsp://other/stream"}`, pathJSON(t, paths["cam1"]))
 }
 
 func TestMemoryStore(t *testing.T) {
@@ -97,14 +84,14 @@ func TestPostgresStore(t *testing.T) {
 		t.Skip("MTX_TEST_POSTGRES not set")
 	}
 
-	testStore(t, func(serverID string) Store {
-		s, err := New(context.Background(), "postgres", dsn, serverID)
+	testStore(t, func() Store {
+		s, err := New(context.Background(), "postgres", dsn)
 		require.NoError(t, err)
 		return s
 	})
 }
 
 func TestNewUnsupportedDriver(t *testing.T) {
-	_, err := New(context.Background(), "mysql", "dsn", "id")
+	_, err := New(context.Background(), "mysql", "dsn")
 	require.EqualError(t, err, `unsupported persistence driver "mysql"`)
 }

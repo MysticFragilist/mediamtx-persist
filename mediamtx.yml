@@ -176,11 +176,6 @@ apiPersistDriver: postgres
 # Database connection string, for instance:
 # postgres://user:pass@localhost:5432/mediamtx?sslmode=disable
 apiPersistConnection: ''
-# Path of the file containing the ID of this server, which is used to separate
-# paths of different servers that share the same database.
-# The file is created with a random ID if it doesn't exist.
-# When empty, the file is "mediamtx-server-id" next to the configuration file.
-apiPersistServerIDFile: ''
 
 ###############################################
 # Global settings -> Metrics server

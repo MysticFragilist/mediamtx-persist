@@ -8,38 +8,33 @@ import (
 	"github.com/bluenviron/mediamtx/internal/conf"
 )
 
-// MemoryDB is an in-memory database that can be shared by multiple MemoryStores.
+// MemoryDB is an in-memory database that survives the stores opened on it.
 // It is meant for tests.
 type MemoryDB struct {
 	mutex sync.Mutex
-	rows  map[string]map[string][]byte
+	rows  map[string][]byte
 
 	// FailWrites makes Upsert and Delete return an error.
 	FailWrites error
 }
 
-// Open returns a store scoped to the given server ID.
-func (db *MemoryDB) Open(serverID string) Store {
-	return &memoryStore{db: db, serverID: serverID}
+// Open returns a store backed by the database.
+func (db *MemoryDB) Open() Store {
+	return &memoryStore{db: db}
 }
 
-// Rows returns the raw JSON of the paths stored for a server.
-func (db *MemoryDB) Rows(serverID string) map[string][]byte {
+// Rows returns the raw JSON of the stored paths.
+func (db *MemoryDB) Rows() map[string][]byte {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 
 	ret := make(map[string][]byte)
-	maps.Copy(ret, db.rows[serverID])
+	maps.Copy(ret, db.rows)
 	return ret
 }
 
 type memoryStore struct {
-	db       *MemoryDB
-	serverID string
-}
-
-func (s *memoryStore) ServerID() string {
-	return s.serverID
+	db *MemoryDB
 }
 
 func (s *memoryStore) Load(_ context.Context) (map[string]*conf.OptionalPath, error) {
@@ -47,7 +42,7 @@ func (s *memoryStore) Load(_ context.Context) (map[string]*conf.OptionalPath, er
 	defer s.db.mutex.Unlock()
 
 	ret := make(map[string]*conf.OptionalPath)
-	for name, raw := range s.db.rows[s.serverID] {
+	for name, raw := range s.db.rows {
 		p, err := decodePath(raw)
 		if err != nil {
 			return nil, err
@@ -71,12 +66,9 @@ func (s *memoryStore) Upsert(_ context.Context, name string, p *conf.OptionalPat
 	}
 
 	if s.db.rows == nil {
-		s.db.rows = make(map[string]map[string][]byte)
+		s.db.rows = make(map[string][]byte)
 	}
-	if s.db.rows[s.serverID] == nil {
-		s.db.rows[s.serverID] = make(map[string][]byte)
-	}
-	s.db.rows[s.serverID][name] = raw
+	s.db.rows[name] = raw
 	return nil
 }
 
@@ -88,7 +80,7 @@ func (s *memoryStore) Delete(_ context.Context, name string) error {
 		return s.db.FailWrites
 	}
 
-	delete(s.db.rows[s.serverID], name)
+	delete(s.db.rows, name)
 	return nil
 }
 

@@ -12,16 +12,15 @@ import (
 	"github.com/bluenviron/mediamtx/internal/conf"
 )
 
-const postgresTable = "mediamtx_api_paths"
+const postgresTable = "mediamtx_paths"
 
 const postgresConnectTimeout = 10 * time.Second
 
 type postgres struct {
-	db       *sql.DB
-	serverID string
+	db *sql.DB
 }
 
-func newPostgres(ctx context.Context, connection string, serverID string) (*postgres, error) {
+func newPostgres(ctx context.Context, connection string) (*postgres, error) {
 	db, err := sql.Open("pgx", connection)
 	if err != nil {
 		return nil, err
@@ -37,30 +36,20 @@ func newPostgres(ctx context.Context, connection string, serverID string) (*post
 	}
 
 	_, err = db.ExecContext(ctx2, `CREATE TABLE IF NOT EXISTS `+postgresTable+` (
-		server_id  TEXT        NOT NULL,
-		name       TEXT        NOT NULL,
+		name       TEXT        PRIMARY KEY,
 		conf       JSONB       NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-		PRIMARY KEY (server_id, name)
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`)
 	if err != nil {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("unable to initialize the persistence database: %w", err)
 	}
 
-	return &postgres{
-		db:       db,
-		serverID: serverID,
-	}, nil
-}
-
-func (s *postgres) ServerID() string {
-	return s.serverID
+	return &postgres{db: db}, nil
 }
 
 func (s *postgres) Load(ctx context.Context) (map[string]*conf.OptionalPath, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT name, conf FROM `+postgresTable+` WHERE server_id = $1`, s.serverID)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, conf FROM `+postgresTable)
 	if err != nil {
 		return nil, err
 	}
@@ -95,15 +84,14 @@ func (s *postgres) Upsert(ctx context.Context, name string, p *conf.OptionalPath
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO `+postgresTable+` (server_id, name, conf, updated_at) VALUES ($1, $2, $3, now())
-		ON CONFLICT (server_id, name) DO UPDATE SET conf = EXCLUDED.conf, updated_at = now()`,
-		s.serverID, name, string(raw))
+		`INSERT INTO `+postgresTable+` (name, conf, updated_at) VALUES ($1, $2, now())
+		ON CONFLICT (name) DO UPDATE SET conf = EXCLUDED.conf, updated_at = now()`,
+		name, string(raw))
 	return err
 }
 
 func (s *postgres) Delete(ctx context.Context, name string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM `+postgresTable+` WHERE server_id = $1 AND name = $2`, s.serverID, name)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM `+postgresTable+` WHERE name = $1`, name)
 	return err
 }
 

@@ -30,26 +30,16 @@ apiPersistConnection: postgres://user:pass@db.example.com:5432/mediamtx?sslmode=
 The only available driver is `postgres` (PostgreSQL). At startup, the server connects to the database and creates the following table if it does not exist:
 
 ```sql
-CREATE TABLE mediamtx_api_paths (
-  server_id  TEXT        NOT NULL,
-  name       TEXT        NOT NULL,
+CREATE TABLE mediamtx_paths (
+  name       TEXT        PRIMARY KEY,
   conf       JSONB       NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (server_id, name)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
 Every API request that changes a path is saved into the database before being applied. If the database cannot be written, the request fails with status code 500 and the change is not applied, so that the running configuration and the database are always consistent. Only the fields that were explicitly set are stored, therefore `pathDefaults` keep applying to restored paths.
 
-### Server ID
-
-Multiple servers can share the same database: each row is associated with the ID of the server that created it, and each server restores only its own paths. The ID is a random UUID that is generated at the first start and saved into a file, which by default is `mediamtx-server-id`, placed next to the configuration file. The location can be changed with:
-
-```yml
-apiPersistServerIDFile: /var/lib/mediamtx/server-id
-```
-
-Keep this file across restarts and upgrades (for instance, in a persistent volume when using Docker), otherwise the server gets a new ID and previous paths are not restored. Copying the file to another machine makes that machine restore the same paths.
+A database is meant to be used by a single server. In a [read replicas](18-scalability.md#read-replicas) setup, enable persistence on the origin instance only, which is the one that receives API requests and publishers; read replicas don't need it, since they use a static proxy configuration. Two servers that share the same database overwrite each other's paths: if you run multiple independent servers, give each one its own database.
 
 ### Behavior and limitations
 

@@ -14,21 +14,19 @@ import (
 const persistOpTimeout = 10 * time.Second
 
 // newPersistStore opens a persistence store. It can be overridden in tests.
-var newPersistStore = func(ctx context.Context, c *conf.Conf, serverID string) (apipersist.Store, error) {
-	return apipersist.New(ctx, c.APIPersistDriver, c.APIPersistConnection, serverID)
+var newPersistStore = func(ctx context.Context, c *conf.Conf) (apipersist.Store, error) {
+	return apipersist.New(ctx, c.APIPersistDriver, c.APIPersistConnection)
 }
 
 type persistKey struct {
-	driver       string
-	connection   string
-	serverIDFile string
+	driver     string
+	connection string
 }
 
 func persistKeyOf(c *conf.Conf) persistKey {
 	return persistKey{
-		driver:       c.APIPersistDriver,
-		connection:   c.APIPersistConnection,
-		serverIDFile: c.APIPersistServerIDFile,
+		driver:     c.APIPersistDriver,
+		connection: c.APIPersistConnection,
 	}
 }
 
@@ -57,16 +55,10 @@ func (p *Core) ensurePersistStore(c *conf.Conf) error {
 
 	p.closePersistStore()
 
-	serverIDFile := apipersist.ServerIDFilePath(c.APIPersistServerIDFile, p.confPath)
-	serverID, err := apipersist.LoadOrCreateServerID(serverIDFile)
-	if err != nil {
-		return fmt.Errorf("API persistence: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(p.ctx, persistOpTimeout)
 	defer cancel()
 
-	store, err := newPersistStore(ctx, c, serverID)
+	store, err := newPersistStore(ctx, c)
 	if err != nil {
 		return fmt.Errorf("API persistence: %w", err)
 	}
@@ -74,8 +66,7 @@ func (p *Core) ensurePersistStore(c *conf.Conf) error {
 	p.persistStore = store
 	p.persistKey = key
 
-	p.Log(logger.Info, "API persistence enabled (driver %s, server ID %s, ID file '%s')",
-		c.APIPersistDriver, serverID, serverIDFile)
+	p.Log(logger.Info, "API persistence enabled (driver %s)", c.APIPersistDriver)
 
 	return nil
 }

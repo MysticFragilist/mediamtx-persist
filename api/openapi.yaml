@@ -334,8 +334,6 @@ components:
           type: string
         apiPersistConnection:
           type: string
-        apiPersistServerIDFile:
-          type: string
         apiEncryption:
           type: boolean
         apiServerCert:

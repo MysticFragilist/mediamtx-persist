@@ -296,10 +296,9 @@ type Conf struct {
 	APITrustedProxies IPNetworks `json:"apiTrustedProxies"`
 
 	// Control API persistence
-	APIPersist             bool   `json:"apiPersist"`
-	APIPersistDriver       string `json:"apiPersistDriver"`
-	APIPersistConnection   string `json:"apiPersistConnection"`
-	APIPersistServerIDFile string `json:"apiPersistServerIDFile"`
+	APIPersist           bool   `json:"apiPersist"`
+	APIPersistDriver     string `json:"apiPersistDriver"`
+	APIPersistConnection string `json:"apiPersistConnection"`
 
 	// Metrics
 	Metrics               bool       `json:"metrics"`

@@ -21,13 +21,13 @@ func useMemoryPersist(t *testing.T, db *apipersist.MemoryDB) {
 	t.Helper()
 
 	prev := newPersistStore
-	newPersistStore = func(_ context.Context, _ *conf.Conf, serverID string) (apipersist.Store, error) {
-		return db.Open(serverID), nil
+	newPersistStore = func(_ context.Context, _ *conf.Conf) (apipersist.Store, error) {
+		return db.Open(), nil
 	}
 	t.Cleanup(func() { newPersistStore = prev })
 }
 
-func persistConf(idFile string, extra string) string {
+func persistConf(extra string) string {
 	return "api: yes\n" +
 		"rtsp: no\n" +
 		"rtmp: no\n" +
@@ -37,7 +37,6 @@ func persistConf(idFile string, extra string) string {
 		"moq: no\n" +
 		"apiPersist: yes\n" +
 		"apiPersistConnection: memory\n" +
-		"apiPersistServerIDFile: " + idFile + "\n" +
 		extra
 }
 
@@ -101,8 +100,7 @@ func TestAPIPersistRestore(t *testing.T) {
 	db := &apipersist.MemoryDB{}
 	useMemoryPersist(t, db)
 
-	idFile := filepath.Join(t.TempDir(), "server-id")
-	cnf := persistConf(idFile, "")
+	cnf := persistConf("")
 
 	// first run: create three cameras, patch one, replace one, delete one.
 	runPersistInstance(t, cnf, func(hc *http.Client) {
@@ -124,10 +122,7 @@ func TestAPIPersistRestore(t *testing.T) {
 			"http://localhost:9997/v3/config/paths/delete/cam4", nil))
 	})
 
-	serverID, err := os.ReadFile(idFile)
-	require.NoError(t, err)
-	rows := db.Rows(string(bytes.TrimSpace(serverID)))
-	require.Len(t, rows, 3)
+	require.Len(t, db.Rows(), 3)
 
 	expected := map[string]string{
 		"cam1": "rtsp://cam1.local/stream",
@@ -140,20 +135,19 @@ func TestAPIPersistRestore(t *testing.T) {
 		require.Equal(t, expected, persistListPaths(t, hc))
 	})
 
-	// a different server sharing the same database does not see them.
-	otherCnf := persistConf(filepath.Join(t.TempDir(), "server-id"), "")
-	runPersistInstance(t, otherCnf, func(hc *http.Client) {
-		require.Empty(t, persistListPaths(t, hc))
+	// restored paths can still be changed, and changes are persisted.
+	runPersistInstance(t, cnf, func(hc *http.Client) {
+		require.Equal(t, http.StatusOK, persistRequest(t, hc, http.MethodDelete,
+			"http://localhost:9997/v3/config/paths/delete/cam1", nil))
 	})
+	require.Len(t, db.Rows(), 2)
 }
 
 func TestAPIPersistConfigFileWins(t *testing.T) {
 	db := &apipersist.MemoryDB{}
 	useMemoryPersist(t, db)
 
-	idFile := filepath.Join(t.TempDir(), "server-id")
-
-	runPersistInstance(t, persistConf(idFile, ""), func(hc *http.Client) {
+	runPersistInstance(t, persistConf(""), func(hc *http.Client) {
 		for _, name := range []string{"cam1", "cam2"} {
 			require.Equal(t, http.StatusOK, persistRequest(t, hc, http.MethodPost,
 				"http://localhost:9997/v3/config/paths/add/"+name,
@@ -161,7 +155,7 @@ func TestAPIPersistConfigFileWins(t *testing.T) {
 		}
 	})
 
-	runPersistInstance(t, persistConf(idFile, "paths:\n"+
+	runPersistInstance(t, persistConf("paths:\n"+
 		"  cam1:\n"+
 		"    source: rtsp://yaml.local/cam1\n"), func(hc *http.Client) {
 		require.Equal(t, map[string]string{
@@ -175,9 +169,7 @@ func TestAPIPersistWriteError(t *testing.T) {
 	db := &apipersist.MemoryDB{FailWrites: errors.New("database down")}
 	useMemoryPersist(t, db)
 
-	idFile := filepath.Join(t.TempDir(), "server-id")
-
-	runPersistInstance(t, persistConf(idFile, ""), func(hc *http.Client) {
+	runPersistInstance(t, persistConf(""), func(hc *http.Client) {
 		require.Equal(t, http.StatusInternalServerError, persistRequest(t, hc, http.MethodPost,
 			"http://localhost:9997/v3/config/paths/add/cam1",
 			map[string]any{"source": "rtsp://cam1.local/stream"}))
@@ -192,10 +184,9 @@ func TestAPIPersistFileReload(t *testing.T) {
 	useMemoryPersist(t, db)
 
 	dir := t.TempDir()
-	idFile := filepath.Join(dir, "server-id")
 	confPath := filepath.Join(dir, "mediamtx.yml")
 
-	require.NoError(t, os.WriteFile(confPath, []byte(persistConf(idFile, "")), 0o644))
+	require.NoError(t, os.WriteFile(confPath, []byte(persistConf("")), 0o644))
 
 	p, ok := New([]string{confPath})
 	require.Equal(t, true, ok)
@@ -210,7 +201,7 @@ func TestAPIPersistFileReload(t *testing.T) {
 		map[string]any{"source": "rtsp://cam1.local/stream"}))
 
 	// edit the configuration file: the API path must survive the reload.
-	require.NoError(t, os.WriteFile(confPath, []byte(persistConf(idFile, "paths:\n"+
+	require.NoError(t, os.WriteFile(confPath, []byte(persistConf("paths:\n"+
 		"  yamlcam:\n"+
 		"    source: rtsp://yaml.local/stream\n")), 0o644))
 
@@ -227,23 +218,4 @@ func TestAPIPersistFileReload(t *testing.T) {
 		"cam1":    "rtsp://cam1.local/stream",
 		"yamlcam": "rtsp://yaml.local/stream",
 	}, persistListPaths(t, hc))
-}
-
-func TestAPIPersistDefaultServerIDFile(t *testing.T) {
-	db := &apipersist.MemoryDB{}
-	useMemoryPersist(t, db)
-
-	dir := t.TempDir()
-	confPath := filepath.Join(dir, "mediamtx.yml")
-	require.NoError(t, os.WriteFile(confPath, []byte("api: yes\n"+
-		"rtsp: no\nrtmp: no\nhls: no\nwebrtc: no\nsrt: no\nmoq: no\n"+
-		"apiPersist: yes\n"+
-		"apiPersistConnection: memory\n"), 0o644))
-
-	p, ok := New([]string{confPath})
-	require.Equal(t, true, ok)
-	p.Close()
-
-	_, err := os.Stat(filepath.Join(dir, apipersist.DefaultServerIDFileName))
-	require.NoError(t, err)
 }
